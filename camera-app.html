@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
+  <title>Kamera</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&display=swap');
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #0a0a0a;
+      --surface: #111;
+      --accent: #e8ff47;
+      --text: #f0f0f0;
+      --muted: #555;
+      --shutter-size: 72px;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      font-family: 'DM Mono', monospace;
+      color: var(--text);
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ── OVERLAY SCREENS ── */
+    .screen {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      z-index: 100;
+      background: var(--bg);
+      transition: opacity 0.4s ease;
+    }
+
+    .screen.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Permission screen */
+    #permission-screen .icon {
+      font-size: 64px;
+      filter: grayscale(0.3);
+    }
+
+    #permission-screen h1 {
+      font-size: 20px;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+      color: var(--text);
+    }
+
+    #permission-screen p {
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-align: center;
+      padding: 0 40px;
+      line-height: 1.8;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #0a0a0a;
+      border: none;
+      padding: 14px 36px;
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+
+    .btn-primary:active {
+      transform: scale(0.96);
+    }
+
+    /* Rotate screen */
+    #rotate-screen {
+      background: var(--bg);
+    }
+
+    #rotate-screen .rotate-icon {
+      font-size: 72px;
+      animation: rotateHint 2.5s ease-in-out infinite;
+      display: inline-block;
+    }
+
+    @keyframes rotateHint {
+      0%, 100% { transform: rotate(0deg); opacity: 0.6; }
+      40%       { transform: rotate(90deg); opacity: 1; }
+      60%       { transform: rotate(90deg); opacity: 1; }
+    }
+
+    #rotate-screen h2 {
+      font-size: 16px;
+      font-weight: 400;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    /* ── CAMERA APP ── */
+    #app {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      /* landscape: viewfinder takes full screen, shutter on right edge */
+    }
+
+    #app.hidden {
+      display: none;
+    }
+
+    /* Viewfinder */
+    #viewfinder-wrap {
+      position: relative;
+      flex: 1;
+      overflow: hidden;
+      background: #000;
+    }
+
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    /* Grid overlay */
+    #grid {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    #grid.visible {
+      opacity: 1;
+    }
+
+    #grid svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Focus ring */
+    #focus-ring {
+      position: absolute;
+      width: 60px;
+      height: 60px;
+      border: 2px solid var(--accent);
+      border-radius: 50%;
+      pointer-events: none;
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(1.4);
+      transition: opacity 0.2s, transform 0.25s;
+    }
+
+    #focus-ring.active {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    /* Flash effect */
+    #flash-overlay {
+      position: absolute;
+      inset: 0;
+      background: white;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.05s;
+    }
+
+    #flash-overlay.flash {
+      opacity: 1;
+    }
+
+    /* HUD top-left info */
+    .hud-info {
+      position: absolute;
+      top: 14px;
+      left: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .hud-tag {
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      color: rgba(255,255,255,0.55);
+      text-transform: uppercase;
+    }
+
+    #shot-count {
+      font-size: 28px;
+      font-weight: 300;
+      color: white;
+      line-height: 1;
+    }
+
+    /* Grid toggle top-right */
+    #grid-toggle {
+      position: absolute;
+      top: 14px;
+      right: 18px;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: white;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      padding: 6px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    #grid-toggle.active {
+      background: rgba(232,255,71,0.2);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* ── SHUTTER PANEL (right side in landscape) ── */
+    /* 
+      In landscape-right mode the phone is rotated 90° clockwise.
+      The "bottom" physical edge (long side) is now the right side of the viewport.
+      We put a vertical strip on the right, center the shutter button there.
+    */
+    #shutter-panel {
+      width: 90px;
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 28px;
+      border-left: 1px solid rgba(255,255,255,0.06);
+      position: relative;
+    }
+
+    /* Decorative accent line */
+    #shutter-panel::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 2px;
+      height: 100%;
+      background: linear-gradient(to bottom, transparent, var(--accent), transparent);
+      opacity: 0.3;
+    }
+
+    /* Shutter button */
+    #shutter-btn {
+      width: var(--shutter-size);
+      height: var(--shutter-size);
+      border-radius: 50%;
+      background: white;
+      border: 4px solid rgba(255,255,255,0.3);
+      outline: 3px solid rgba(255,255,255,0.15);
+      outline-offset: 3px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.1s, background 0.1s;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.05), 0 8px 24px rgba(0,0,0,0.5);
+      -webkit-tap-highlight-color: transparent;
+      position: relative;
+    }
+
+    #shutter-btn::after {
+      content: '';
+      position: absolute;
+      inset: 6px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.08);
+    }
+
+    #shutter-btn:active {
+      transform: scale(0.9);
+      background: #e0e0e0;
+    }
+
+    /* Gallery preview */
+    #gallery-preview {
+      width: 52px;
+      height: 52px;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 2px solid rgba(255,255,255,0.15);
+      background: var(--bg);
+      cursor: pointer;
+      transition: border-color 0.2s, transform 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #gallery-preview:active {
+      transform: scale(0.93);
+    }
+
+    #gallery-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #gallery-placeholder {
+      font-size: 20px;
+      opacity: 0.3;
+    }
+
+    /* Panel label */
+    .panel-label {
+      position: absolute;
+      bottom: 16px;
+      font-size: 9px;
+      letter-spacing: 0.15em;
+      color: var(--muted);
+      text-transform: uppercase;
+      writing-mode: vertical-rl;
+    }
+
+    /* ── GALLERY MODAL ── */
+    #gallery-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.92);
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      transition: opacity 0.3s;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    #gallery-modal.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .gallery-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .gallery-header h3 {
+      font-size: 12px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    #close-gallery {
+      background: none;
+      border: none;
+      color: var(--text);
+      font-size: 22px;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    #photos-grid {
+      flex: 1;
+      overflow-y: auto;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2px;
+      padding: 2px;
+      align-content: start;
+    }
+
+    .photo-thumb {
+      aspect-ratio: 1;
+      overflow: hidden;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .photo-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.2s;
+    }
+
+    .photo-thumb:active img {
+      transform: scale(0.96);
+    }
+
+    .download-btn {
+      position: absolute;
+      bottom: 6px;
+      right: 6px;
+      background: rgba(0,0,0,0.6);
+      border: none;
+      color: white;
+      font-size: 14px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(4px);
+    }
+
+    /* Error message */
+    #error-msg {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #ff4444;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      z-index: 300;
+      transition: opacity 0.4s;
+    }
+
+    #error-msg.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Canvas (hidden, for capture) */
+    #capture-canvas { display: none; }
+
+    /* Pulse animation for shutter */
+    @keyframes shutterPulse {
+      0%   { box-shadow: 0 0 0 0 rgba(232,255,71,0.5); }
+      70%  { box-shadow: 0 0 0 18px rgba(232,255,71,0); }
+      100% { box-shadow: 0 0 0 0 rgba(232,255,71,0); }
+    }
+
+    .shutter-pulse {
+      animation: shutterPulse 0.4s ease-out;
+    }
+  </style>
+</head>
+<body>
+
+<!-- 1. Permission screen -->
+<div id="permission-screen" class="screen">
+  <div class="icon">📷</div>
+  <h1>Kamera Uygulaması</h1>
+  <p>Devam etmek için kamera erişimine<br>izin vermeniz gerekiyor.</p>
+  <button class="btn-primary" id="request-permission">KAMERAY BAŞLAT</button>
+</div>
+
+<!-- 2. Rotate screen (portrait mode guard) -->
+<div id="rotate-screen" class="screen hidden">
+  <span class="rotate-icon">📱</span>
+  <h2>Sağa döndür</h2>
+  <p style="font-size:12px; color:#555; letter-spacing:0.08em; text-align:center; line-height:1.8;">
+    Uygulamayı kullanmak için<br>telefonu sağa çevirin.
+  </p>
+</div>
+
+<!-- 3. Main camera app -->
+<div id="app" class="hidden">
+  <!-- Viewfinder -->
+  <div id="viewfinder-wrap">
+    <video id="video" autoplay playsinline muted></video>
+
+    <!-- Rule-of-thirds grid -->
+    <div id="grid">
+      <svg viewBox="0 0 300 200" preserveAspectRatio="none">
+        <line x1="100" y1="0" x2="100" y2="200" stroke="rgba(255,255,255,0.2)" stroke-width="0.5"/>
+        <line x1="200" y1="0" x2="200" y2="200" stroke="rgba(255,255,255,0.2)" stroke-width="0.5"/>
+        <line x1="0"   y1="67" x2="300" y2="67"  stroke="rgba(255,255,255,0.2)" stroke-width="0.5"/>
+        <line x1="0"   y1="133" x2="300" y2="133" stroke="rgba(255,255,255,0.2)" stroke-width="0.5"/>
+      </svg>
+    </div>
+
+    <!-- Focus ring -->
+    <div id="focus-ring"></div>
+
+    <!-- Flash overlay -->
+    <div id="flash-overlay"></div>
+
+    <!-- HUD -->
+    <div class="hud-info">
+      <span class="hud-tag">çekim</span>
+      <span id="shot-count">000</span>
+    </div>
+
+    <!-- Grid toggle -->
+    <button id="grid-toggle">IZGARA</button>
+  </div>
+
+  <!-- Shutter panel (right side = bottom physical edge in landscape-right) -->
+  <div id="shutter-panel">
+    <!-- Gallery preview (top of panel) -->
+    <div id="gallery-preview" title="Galeri">
+      <div id="gallery-placeholder">▤</div>
+    </div>
+
+    <!-- Shutter button (center of panel) -->
+    <button id="shutter-btn" aria-label="Fotoğraf çek"></button>
+
+    <!-- Spacer to balance -->
+    <div style="width:52px; height:52px;"></div>
+
+    <span class="panel-label">KAMERA</span>
+  </div>
+</div>
+
+<!-- Gallery modal -->
+<div id="gallery-modal" class="hidden">
+  <div class="gallery-header">
+    <h3>Çekilen Fotoğraflar</h3>
+    <button id="close-gallery">✕</button>
+  </div>
+  <div id="photos-grid"></div>
+</div>
+
+<!-- Error toast -->
+<div id="error-msg" class="hidden"></div>
+
+<canvas id="capture-canvas"></canvas>
+
+<script>
+  // ── State ──
+  let stream = null;
+  let photos = [];
+  let shotCount = 0;
+  let gridVisible = false;
+  let isLandscapeRight = false;
+  let permissionGranted = false;
+
+  // ── Elements ──
+  const permScreen   = document.getElementById('permission-screen');
+  const rotateScreen = document.getElementById('rotate-screen');
+  const app          = document.getElementById('app');
+  const video        = document.getElementById('video');
+  const canvas       = document.getElementById('capture-canvas');
+  const shutterBtn   = document.getElementById('shutter-btn');
+  const flashOverlay = document.getElementById('flash-overlay');
+  const focusRing    = document.getElementById('focus-ring');
+  const shotCountEl  = document.getElementById('shot-count');
+  const gridEl       = document.getElementById('grid');
+  const gridToggle   = document.getElementById('grid-toggle');
+  const galleryPreview  = document.getElementById('gallery-preview');
+  const galleryModal    = document.getElementById('gallery-modal');
+  const photosGrid      = document.getElementById('photos-grid');
+  const closeGalleryBtn = document.getElementById('close-gallery');
+  const errorMsg        = document.getElementById('error-msg');
+
+  // ── Orientation detection ──
+  function checkOrientation() {
+    // landscape-right: phone rotated clockwise 90°
+    // screen.orientation.angle === 90 on most Android devices for landscape-right
+    // We also fallback to window.orientation
+    let angle = 0;
+
+    if (screen.orientation && screen.orientation.angle !== undefined) {
+      angle = screen.orientation.angle;
+    } else if (typeof window.orientation !== 'undefined') {
+      angle = window.orientation;
+    }
+
+    // landscape-right = 90 degrees (clockwise rotation)
+    // landscape-left  = -90 or 270
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const isLandscape = w > h;
+
+    // Determine direction
+    // angle 90 → landscape-right (most Android)
+    // angle -90 or 270 → landscape-left
+    if (isLandscape) {
+      if (angle === 90 || angle === -270) {
+        isLandscapeRight = true;
+      } else if (angle === -90 || angle === 270) {
+        isLandscapeRight = false;
+      } else {
+        // Some devices report 0 in landscape; treat as landscape-right if width > height
+        // and we can't tell — be permissive
+        isLandscapeRight = true;
+      }
+    } else {
+      isLandscapeRight = false;
+    }
+
+    updateUI();
+  }
+
+  function updateUI() {
+    if (!permissionGranted) return;
+
+    if (isLandscapeRight) {
+      rotateScreen.classList.add('hidden');
+      app.classList.remove('hidden');
+    } else {
+      rotateScreen.classList.remove('hidden');
+      app.classList.add('hidden');
+    }
+  }
+
+  window.addEventListener('orientationchange', () => {
+    setTimeout(checkOrientation, 200);
+  });
+
+  if (screen.orientation) {
+    screen.orientation.addEventListener('change', () => {
+      setTimeout(checkOrientation, 200);
+    });
+  }
+
+  window.addEventListener('resize', () => {
+    setTimeout(checkOrientation, 150);
+  });
+
+  // ── Camera start ──
+  document.getElementById('request-permission').addEventListener('click', startCamera);
+
+  async function startCamera() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        audio: false
+      });
+
+      video.srcObject = stream;
+      await video.play();
+
+      permissionGranted = true;
+      permScreen.classList.add('hidden');
+      checkOrientation();
+
+    } catch (err) {
+      showError('Kamera erişimi reddedildi veya mevcut değil.');
+      console.error(err);
+    }
+  }
+
+  // ── Shutter ──
+  shutterBtn.addEventListener('click', capturePhoto);
+  shutterBtn.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    capturePhoto();
+  });
+
+  function capturePhoto() {
+    if (!stream) return;
+
+    // Flash effect
+    flashOverlay.classList.add('flash');
+    setTimeout(() => flashOverlay.classList.remove('flash'), 150);
+
+    // Pulse
+    shutterBtn.classList.add('shutter-pulse');
+    setTimeout(() => shutterBtn.classList.remove('shutter-pulse'), 400);
+
+    // Draw to canvas
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    canvas.width  = vw;
+    canvas.height = vh;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, vw, vh);
+
+    const dataURL = canvas.toDataURL('image/jpeg', 0.92);
+    photos.unshift(dataURL);
+    shotCount++;
+
+    // Update counter
+    shotCountEl.textContent = String(shotCount).padStart(3, '0');
+
+    // Update gallery preview
+    updateGalleryPreview();
+  }
+
+  // ── Gallery preview ──
+  function updateGalleryPreview() {
+    if (photos.length === 0) return;
+    const placeholder = document.getElementById('gallery-placeholder');
+    if (placeholder) placeholder.remove();
+
+    // Check if img already exists
+    let img = galleryPreview.querySelector('img');
+    if (!img) {
+      img = document.createElement('img');
+      galleryPreview.appendChild(img);
+    }
+    img.src = photos[0];
+  }
+
+  // ── Gallery modal ──
+  galleryPreview.addEventListener('click', openGallery);
+  closeGalleryBtn.addEventListener('click', closeGallery);
+
+  function openGallery() {
+    if (photos.length === 0) return;
+    buildPhotoGrid();
+    galleryModal.classList.remove('hidden');
+  }
+
+  function closeGallery() {
+    galleryModal.classList.add('hidden');
+  }
+
+  function buildPhotoGrid() {
+    photosGrid.innerHTML = '';
+    photos.forEach((dataURL, i) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'photo-thumb';
+
+      const img = document.createElement('img');
+      img.src = dataURL;
+
+      const dlBtn = document.createElement('button');
+      dlBtn.className = 'download-btn';
+      dlBtn.title = 'İndir';
+      dlBtn.textContent = '↓';
+      dlBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        downloadPhoto(dataURL, i);
+      });
+
+      wrap.appendChild(img);
+      wrap.appendChild(dlBtn);
+      photosGrid.appendChild(wrap);
+    });
+  }
+
+  function downloadPhoto(dataURL, index) {
+    const a = document.createElement('a');
+    a.href = dataURL;
+    a.download = `foto_${String(index + 1).padStart(3, '0')}.jpg`;
+    a.click();
+  }
+
+  // ── Grid toggle ──
+  gridToggle.addEventListener('click', () => {
+    gridVisible = !gridVisible;
+    gridEl.classList.toggle('visible', gridVisible);
+    gridToggle.classList.toggle('active', gridVisible);
+  });
+
+  // ── Focus on tap ──
+  document.getElementById('viewfinder-wrap').addEventListener('click', (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    focusRing.style.left = x + 'px';
+    focusRing.style.top  = y + 'px';
+    focusRing.classList.add('active');
+
+    // Try camera focus API
+    const track = stream && stream.getVideoTracks()[0];
+    if (track && track.getCapabilities) {
+      const caps = track.getCapabilities();
+      if (caps.focusMode && caps.focusMode.includes('single-shot')) {
+        track.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] }).catch(() => {});
+      }
+    }
+
+    setTimeout(() => focusRing.classList.remove('active'), 1200);
+  });
+
+  // ── Error toast ──
+  function showError(msg) {
+    errorMsg.textContent = msg;
+    errorMsg.classList.remove('hidden');
+    setTimeout(() => errorMsg.classList.add('hidden'), 3500);
+  }
+
+  // ── Init ──
+  checkOrientation();
+</script>
+</body>
+</html>
